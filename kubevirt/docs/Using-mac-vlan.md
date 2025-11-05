@@ -183,7 +183,6 @@ spec:
   running: true
   template:
     spec:
-      serviceAccountName: macvtap-launcher
       domain:
         devices:
           interfaces:
@@ -195,10 +194,18 @@ spec:
         - name: vlan12
           multus:
             networkName: macvtap-demo/vlan12-macvtap
+      volumes:
+        - name: macvtap-launcher-sa
+          serviceAccount:
+            serviceAccountName: macvtap-launcher
 ```
 
 KubeVirt will build the network attachment using the macvtap plugin and rely on the Multus annotation to
 locate the `vlan12-macvtap` definition.【F:kubevirt/docs/network/network-binding-plugin.md†L68-L120】【F:kubevirt/pkg/libvmi/network.go†L87-L110】
+The `serviceAccount` volume makes the resulting virt-launcher pod run with the `macvtap-launcher`
+permissions that were granted earlier; KubeVirt derives the pod service account from this volume when it
+renders the launcher manifest.【F:kubevirt/pkg/virt-controller/services/template.go†L643-L656】【F:kubevirt/pkg/virt-controller/services/rendervolumes.go†L578-L583】 Add any other disks or volumes your
+workload requires alongside the service account volume.
 
 Create the VM and confirm that the interface appears inside the guest:
 
