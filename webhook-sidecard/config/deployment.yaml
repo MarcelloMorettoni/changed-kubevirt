@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-sidecard
+  namespace: kubevirt-webhooks
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webhook-sidecard
+  template:
+    metadata:
+      labels:
+        app: webhook-sidecard
+    spec:
+      serviceAccountName: webhook-sidecard
+      containers:
+        - name: webhook-sidecard
+          image: your-registry/webhook-sidecard:latest
+          args:
+            - --addr=:8443
+          env:
+            - name: TLS_CERT_FILE
+              value: /certs/tls.crt
+            - name: TLS_KEY_FILE
+              value: /certs/tls.key
+          ports:
+            - containerPort: 8443
+              name: webhook
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /certs
+              readOnly: true
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: webhook-sidecard-tls
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: webhook-sidecard
+  namespace: kubevirt-webhooks
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: webhook-sidecard
+  namespace: kubevirt-webhooks
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: webhook-sidecard
+  namespace: kubevirt-webhooks
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: webhook-sidecard
+subjects:
+  - kind: ServiceAccount
+    name: webhook-sidecard
+    namespace: kubevirt-webhooks
