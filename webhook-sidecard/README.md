@@ -1,65 +1,77 @@
-# webhook-sidecard
+# Macvtap admission webhook
 
-This module provides a lightweight mutating admission webhook that injects the
-Linux capabilities required by the macvtap binding plugin into Pods. It is
-designed to run alongside KubeVirt and automatically updates any Pod that
-requests macvtap resources so that it runs in privileged mode with the
-`DAC_OVERRIDE`, `NET_ADMIN`, and `SYS_RAWIO` capabilities.
+This module implements a mutating admission webhook that automatically injects
+the Linux capabilities required by the macvtap binding plugin into Pods. Run it
+alongside KubeVirt to guarantee that any Pod requesting macvtap resources gets
+`securityContext.privileged: true` together with the `DAC_OVERRIDE`,
+`NET_ADMIN`, and `SYS_RAWIO` capabilities.
 
-## How it works
+## Understand what the webhook mutates
 
-The webhook inspects Pod admission requests and looks for signs that the
-workload needs the macvtap binding plugin:
+1. The webhook inspects every Pod admission request.
+2. It looks for any of the following macvtap signals:
+   * Multus namespace annotations (`k8s.v1.cni.cncf.io/*`) that mention
+     `macvtap`.
+   * Container resource requests or limits that include `macvtap` (for example
+     `macvtap.network.kubevirt.io/eno1`).
+3. When it finds a match, it returns a JSON merge patch that updates **all**
+   init containers and app containers to run privileged and to add the
+   capabilities listed above.
 
-* Namespace annotations created by Multus (`k8s.v1.cni.cncf.io/*`) that mention
-  `macvtap`.
-* Resource requests or limits with names that include `macvtap` (for example
-  `macvtap.network.kubevirt.io/eno1`).
+## Run the webhook locally
 
-Whenever either condition is true, the webhook returns a JSON merge patch that
-updates **all** init containers and app containers to include:
+Follow these steps from inside the `webhook-sidecard/` directory:
 
-* `securityContext.privileged: true`
-* `securityContext.capabilities.add`: `DAC_OVERRIDE`, `NET_ADMIN`, `SYS_RAWIO`
+1. **Build the binary**
 
-## Running locally
+   ```bash
+   go build
+   ```
 
-```bash
-go build
-./webhook-sidecard --allow-http --addr :8080
-```
+2. **Start the server**
 
-The `--allow-http` flag starts the server without TLS which is useful for local
-experimentation. In production you should mount a TLS certificate and key and
-omit that flag.
+   ```bash
+   ./webhook-sidecard --allow-http --addr :8080
+   ```
 
-## Deploying to a cluster
+   Use `--allow-http` only for local testing. In production provide TLS
+   certificates instead of enabling HTTP.
 
-The [`config/`](config/) directory contains example manifests:
+## Build the container image
 
-* `deployment.yaml` – Runs the webhook server.
-* `service.yaml` – Exposes the webhook inside the cluster.
-* `mutatingwebhook.yaml` – Registers the webhook with the Kubernetes API
-  server.
+1. Make sure you are still in `webhook-sidecard/`.
+2. Run the build command with your preferred registry reference:
 
-Update the image reference in the deployment and patch the certificate bundle
-in the webhook configuration before applying it to your cluster.
+   ```bash
+   docker build -t <your-registry>/webhook-sidecard:latest .
+   ```
 
-```bash
-kubectl apply -f config/service.yaml
-kubectl apply -f config/deployment.yaml
-kubectl apply -f config/mutatingwebhook.yaml
-```
+## Deploy to a cluster
 
-## Building the container image
+1. **Review the manifests** in [`config/`](config/):
+   * `service.yaml` exposes the webhook inside the cluster.
+   * `deployment.yaml` runs the webhook server.
+   * `mutatingwebhook.yaml` registers the webhook with the Kubernetes API
+     server.
+2. **Update the image** value in `deployment.yaml` to point to your published
+   container.
+3. **Patch the CA bundle** in `mutatingwebhook.yaml` with the base64 encoded
+   certificate that signs your TLS secret.
+4. **Apply the resources** in the correct order:
 
-```bash
-# from the webhook-sidecard directory
-docker build -t <your-registry>/webhook-sidecard:latest .
-```
+   ```bash
+   kubectl apply -f config/service.yaml
+   kubectl apply -f config/deployment.yaml
+   kubectl apply -f config/mutatingwebhook.yaml
+   ```
 
-## Environment variables
+## Configure TLS
 
-* `TLS_CERT_FILE`, `TLS_KEY_FILE` – Optional alternatives to the `--tls-cert`
-  and `--tls-key` flags. When neither flag nor environment variable is
-  provided the server refuses to start unless `--allow-http` is used.
+You can pass the TLS material via flags or environment variables when creating
+the deployment:
+
+* `--tls-cert` / `TLS_CERT_FILE` – Path to the serving certificate.
+* `--tls-key` / `TLS_KEY_FILE` – Path to the private key.
+
+If neither option is provided the server refuses to start unless `--allow-http`
+is explicitly set (only recommended for local testing).
