@@ -4305,7 +4305,41 @@ var _ = Describe("Template", func() {
 			for _, container := range pod.Spec.Containers {
 				if container.Name == "compute" {
 					Expect(container.SecurityContext.Capabilities.Add).To(
-						ContainElement(k8sv1.Capability("NET_BIND_SERVICE")))
+						ContainElements(
+							k8sv1.Capability(CAP_NET_BIND_SERVICE),
+							k8sv1.Capability(CAP_DAC_OVERRIDE),
+							k8sv1.Capability(CAP_NET_ADMIN),
+							k8sv1.Capability(CAP_SYS_RAWIO),
+						))
+					Expect(container.SecurityContext.Privileged).ToNot(BeNil())
+					Expect(*container.SecurityContext.Privileged).To(BeTrue())
+					return
+				}
+			}
+			Expect(false).To(BeTrue())
+		})
+
+		It("should run privileged when macvtap binding plugin is used", func() {
+			vmi := api.NewMinimalVMI("fake-vmi")
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{{
+				Name:    "test",
+				Binding: &v1.PluginBinding{Name: "macvtap"},
+			}}
+
+			pod, err := svc.RenderLaunchManifest(vmi)
+			Expect(err).ToNot(HaveOccurred())
+
+			for _, container := range pod.Spec.Containers {
+				if container.Name == "compute" {
+					Expect(container.SecurityContext.Capabilities.Add).To(
+						ContainElements(
+							k8sv1.Capability(CAP_NET_BIND_SERVICE),
+							k8sv1.Capability(CAP_DAC_OVERRIDE),
+							k8sv1.Capability(CAP_NET_ADMIN),
+							k8sv1.Capability(CAP_SYS_RAWIO),
+						))
+					Expect(container.SecurityContext.Privileged).ToNot(BeNil())
+					Expect(*container.SecurityContext.Privileged).To(BeTrue())
 					return
 				}
 			}
@@ -4334,11 +4368,41 @@ var _ = Describe("Template", func() {
 			Entry("on a root virt-launcher", func() *v1.VirtualMachineInstance {
 				return api.NewMinimalVMI("fake-vmi")
 			}, "compute", []k8sv1.Capability{CAP_NET_BIND_SERVICE, CAP_SYS_NICE}, nil),
+			Entry("on a root virt-launcher with macvtap", func() *v1.VirtualMachineInstance {
+				vmi := api.NewMinimalVMI("fake-vmi")
+				vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{{
+					Name: "test",
+					InterfaceBindingMethod: v1.InterfaceBindingMethod{
+						DeprecatedMacvtap: &v1.DeprecatedInterfaceMacvtap{},
+					},
+				}}
+				return vmi
+			}, "compute", []k8sv1.Capability{
+				CAP_NET_BIND_SERVICE,
+				CAP_SYS_NICE,
+				CAP_DAC_OVERRIDE,
+				CAP_NET_ADMIN,
+				CAP_SYS_RAWIO,
+			}, nil),
 			Entry("on a non-root virt-launcher", func() *v1.VirtualMachineInstance {
 				vmi := api.NewMinimalVMI("fake-vmi")
 				vmi.Status.RuntimeUser = uint64(nonRootUser)
 				return vmi
 			}, "compute", []k8sv1.Capability{CAP_NET_BIND_SERVICE}, []k8sv1.Capability{"ALL"}),
+			Entry("on a non-root virt-launcher with macvtap binding", func() *v1.VirtualMachineInstance {
+				vmi := api.NewMinimalVMI("fake-vmi")
+				vmi.Status.RuntimeUser = uint64(nonRootUser)
+				vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{{
+					Name:    "test",
+					Binding: &v1.PluginBinding{Name: "macvtap"},
+				}}
+				return vmi
+			}, "compute", []k8sv1.Capability{
+				CAP_NET_BIND_SERVICE,
+				CAP_DAC_OVERRIDE,
+				CAP_NET_ADMIN,
+				CAP_SYS_RAWIO,
+			}, []k8sv1.Capability{"ALL"}),
 			Entry("on a sidecar container", func() *v1.VirtualMachineInstance {
 				vmi := api.NewMinimalVMI("fake-vmi")
 				vmi.Status.RuntimeUser = uint64(nonRootUser)

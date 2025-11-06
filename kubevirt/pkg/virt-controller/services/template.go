@@ -92,6 +92,9 @@ const qemuTimeoutJitterRange = 120
 const (
 	CAP_NET_BIND_SERVICE = "NET_BIND_SERVICE"
 	CAP_SYS_NICE         = "SYS_NICE"
+	CAP_DAC_OVERRIDE     = "DAC_OVERRIDE"
+	CAP_NET_ADMIN        = "NET_ADMIN"
+	CAP_SYS_RAWIO        = "SYS_RAWIO"
 )
 
 // LibvirtStartupDelay is added to custom liveness and readiness probes initial delay value.
@@ -828,6 +831,9 @@ func (t *TemplateService) newContainerSpecRenderer(vmi *v1.VirtualMachineInstanc
 		WithResourceRequirements(resources),
 		WithPorts(vmi),
 		WithCapabilities(vmi),
+	}
+	if hasMacvtapInterface(vmi) {
+		computeContainerOpts = append(computeContainerOpts, WithPrivileged(true))
 	}
 	if util.IsNonRootVMI(vmi) {
 		computeContainerOpts = append(computeContainerOpts, WithNonRoot(userId))
