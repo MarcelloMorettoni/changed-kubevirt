@@ -54,6 +54,13 @@ var _ = Describe("Container spec renderer", func() {
 			CAP_NET_BIND_SERVICE,
 			CAP_SYS_NICE,
 		}
+		macvtapCapabilities := []k8sv1.Capability{
+			CAP_NET_BIND_SERVICE,
+			CAP_SYS_NICE,
+			CAP_DAC_OVERRIDE,
+			CAP_NET_ADMIN,
+			CAP_SYS_RAWIO,
+		}
 		Context("a VMI running as root", func() {
 			BeforeEach(func() {
 				specRenderer = NewContainerSpecRenderer(containerName, img, pullPolicy, WithCapabilities(simplestVMI()))
@@ -79,6 +86,28 @@ var _ = Describe("Container spec renderer", func() {
 						ConsistOf(allowedCapabilities))
 				})
 			})
+
+			Context("with a macvtap interface", func() {
+				It("requests additional capabilities required by macvtap", func() {
+					specRenderer = NewContainerSpecRenderer(
+						containerName,
+						img,
+						pullPolicy,
+						WithCapabilities(vmiWithDeprecatedMacvtapInterface()))
+					Expect(specRenderer.Render(exampleCommand).SecurityContext.Capabilities.Add).Should(
+						ConsistOf(macvtapCapabilities))
+				})
+
+				It("requests additional capabilities for macvtap binding plugin", func() {
+					specRenderer = NewContainerSpecRenderer(
+						containerName,
+						img,
+						pullPolicy,
+						WithCapabilities(vmiWithMacvtapBindingPlugin()))
+					Expect(specRenderer.Render(exampleCommand).SecurityContext.Capabilities.Add).Should(
+						ConsistOf(macvtapCapabilities))
+				})
+			})
 		})
 
 		Context("a VMI belonging to a non root user", func() {
@@ -94,6 +123,25 @@ var _ = Describe("Container spec renderer", func() {
 			It("must request the NET_BIND_SERVICE capability", func() {
 				Expect(specRenderer.Render(exampleCommand).SecurityContext.Capabilities.Add).Should(
 					ConsistOf(k8sv1.Capability(CAP_NET_BIND_SERVICE)))
+			})
+
+			It("must request macvtap capabilities when using macvtap binding", func() {
+				macvtapNonRoot := nonRootVMI(nonRootUser)
+				macvtapNonRoot.Spec.Domain = v1.DomainSpec{
+					Devices: v1.Devices{Interfaces: []v1.Interface{newMacvtapBindingInterface("iface")}},
+				}
+				specRenderer = NewContainerSpecRenderer(
+					containerName,
+					img,
+					pullPolicy,
+					WithCapabilities(macvtapNonRoot))
+				Expect(specRenderer.Render(exampleCommand).SecurityContext.Capabilities.Add).Should(
+					ConsistOf(
+						k8sv1.Capability(CAP_NET_BIND_SERVICE),
+						k8sv1.Capability(CAP_DAC_OVERRIDE),
+						k8sv1.Capability(CAP_NET_ADMIN),
+						k8sv1.Capability(CAP_SYS_RAWIO),
+					))
 			})
 		})
 	})
@@ -254,6 +302,22 @@ func vmiWithInterfaceWithPortAllowList(ifaceName string, ports ...v1.Port) *v1.V
 	return vmi
 }
 
+func vmiWithDeprecatedMacvtapInterface() *v1.VirtualMachineInstance {
+	vmi := simplestVMI()
+	vmi.Spec.Domain = v1.DomainSpec{
+		Devices: v1.Devices{Interfaces: []v1.Interface{newDeprecatedMacvtapInterface("iface")}},
+	}
+	return vmi
+}
+
+func vmiWithMacvtapBindingPlugin() *v1.VirtualMachineInstance {
+	vmi := simplestVMI()
+	vmi.Spec.Domain = v1.DomainSpec{
+		Devices: v1.Devices{Interfaces: []v1.Interface{newMacvtapBindingInterface("iface")}},
+	}
+	return vmi
+}
+
 func vmiWithVirtioFS(user uint64) *v1.VirtualMachineInstance {
 	const fsName = "0_o"
 	vmi := nonRootVMI(user)
@@ -279,6 +343,24 @@ func nonRootVMI(user uint64) *v1.VirtualMachineInstance {
 func simplestVMI() *v1.VirtualMachineInstance {
 	return &v1.VirtualMachineInstance{
 		Spec: v1.VirtualMachineInstanceSpec{},
+	}
+}
+
+func newDeprecatedMacvtapInterface(name string) v1.Interface {
+	return v1.Interface{
+		Name: name,
+		InterfaceBindingMethod: v1.InterfaceBindingMethod{
+			DeprecatedMacvtap: &v1.DeprecatedInterfaceMacvtap{},
+		},
+	}
+}
+
+func newMacvtapBindingInterface(name string) v1.Interface {
+	return v1.Interface{
+		Name: name,
+		Binding: &v1.PluginBinding{
+			Name: "macvtap",
+		},
 	}
 }
 

@@ -25,6 +25,7 @@ type ContainerSpecRenderer struct {
 	launcherImg       string
 	name              string
 	userID            int64
+	privileged        *bool
 	volumeDevices     []k8sv1.VolumeDevice
 	volumeMounts      []k8sv1.VolumeMount
 	sharedFilesystems []string
@@ -56,7 +57,7 @@ func (csr *ContainerSpecRenderer) Render(cmd []string) k8sv1.Container {
 		Name:                     csr.name,
 		Image:                    csr.launcherImg,
 		ImagePullPolicy:          csr.imgPullPolicy,
-		SecurityContext:          securityContext(csr.userID, csr.capabilities),
+		SecurityContext:          securityContext(csr.userID, csr.capabilities, csr.privileged),
 		Command:                  cmd,
 		VolumeDevices:            csr.volumeDevices,
 		VolumeMounts:             csr.volumeMounts,
@@ -92,6 +93,12 @@ func (csr *ContainerSpecRenderer) envVars() []k8sv1.EnvVar {
 func WithNonRoot(userID int64) Option {
 	return func(renderer *ContainerSpecRenderer) {
 		renderer.userID = userID
+	}
+}
+
+func WithPrivileged(enabled bool) Option {
+	return func(renderer *ContainerSpecRenderer) {
+		renderer.privileged = pointer.P(enabled)
 	}
 }
 
@@ -203,12 +210,16 @@ func xdgEnvironmentVariables() []k8sv1.EnvVar {
 	}
 }
 
-func securityContext(userId int64, requiredCapabilities *k8sv1.Capabilities) *k8sv1.SecurityContext {
+func securityContext(userId int64, requiredCapabilities *k8sv1.Capabilities, privileged *bool) *k8sv1.SecurityContext {
 	isNonRoot := userId != 0
 	context := &k8sv1.SecurityContext{
 		RunAsUser:    &userId,
 		RunAsNonRoot: &isNonRoot,
 		Capabilities: requiredCapabilities,
+	}
+
+	if privileged != nil {
+		context.Privileged = privileged
 	}
 
 	if isNonRoot {
@@ -290,5 +301,27 @@ func requiredCapabilities(vmi *v1.VirtualMachineInstance) []k8sv1.Capability {
 		capabilities = append(capabilities, CAP_SYS_NICE)
 	}
 
+	if hasMacvtapInterface(vmi) {
+		capabilities = append(capabilities,
+			CAP_DAC_OVERRIDE,
+			CAP_NET_ADMIN,
+			CAP_SYS_RAWIO,
+		)
+	}
+
 	return capabilities
+}
+
+func hasMacvtapInterface(vmi *v1.VirtualMachineInstance) bool {
+	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
+		if iface.InterfaceBindingMethod.DeprecatedMacvtap != nil {
+			return true
+		}
+
+		if iface.Binding != nil && iface.Binding.Name == "macvtap" {
+			return true
+		}
+	}
+
+	return false
 }
