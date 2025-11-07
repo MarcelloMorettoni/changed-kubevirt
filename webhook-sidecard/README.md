@@ -75,3 +75,24 @@ the deployment:
 
 If neither option is provided the server refuses to start unless `--allow-http`
 is explicitly set (only recommended for local testing).
+
+### Create the Kubernetes secret
+
+The deployment manifest mounts a secret named `webhook-sidecard-tls` at
+`/certs` so the container can read the serving certificate and key.
+
+1. Generate or obtain a TLS certificate that matches the DNS name you configure
+   in `mutatingwebhook.yaml` (for example `webhook-sidecard.kubevirt-webhooks.svc`).
+2. Create or update the secret in the namespace where you deploy the webhook:
+
+   ```bash
+   kubectl create secret tls webhook-sidecard-tls \
+     --cert=path/to/tls.crt \
+     --key=path/to/tls.key \
+     -n <webhook-namespace>
+   ```
+
+   Replace `<webhook-namespace>` with the namespace used by your Deployment
+   (the provided manifests default to `kubevirt-webhooks`). If the secret is
+   missing, pods will stay in the `ContainerCreating` state with a
+   `MountVolume.SetUp failed for volume "webhook-certs"` error.
